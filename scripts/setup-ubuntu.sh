@@ -1,3 +1,5 @@
+cd ..
+
 # Install apt-getable dependencies
 sudo apt-get update \
     && apt-get install -y \

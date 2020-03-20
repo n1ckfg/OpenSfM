@@ -35,6 +35,7 @@ def configure_c_extension():
         'cmake',
         '../opensfm/src',
         '-DPYTHON_EXECUTABLE=' + sys.executable,
+	'-DEIGEN_INCLUDE_DIR_HINTS:PATH=/usr/local/Cellar/eigen/3.3.7'
     ]
     subprocess.check_call(cmake_command, cwd='cmake_build')
 
