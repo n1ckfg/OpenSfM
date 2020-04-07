@@ -2,6 +2,8 @@
 
 # https://www.opensfm.org/docs/building.html
 
+cd ..
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -10,12 +12,14 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-cd $DIR
+git submodule update --init --recursive
 
 brew install opencv
 brew install ceres-solver
 brew install eigen
-sudo pip install -r requirements.txt
+#sudo pip3 install -r requirements.txt
+sudo pip3 install exifread==2.1.2 gpxpy==1.1.2 networkx==1.11 numpy pyproj==1.9.5.1 pytest==3.0.7 python-dateutil==2.6.0 PyYAML==3.12 scipy xmltodict==0.10.2 loky repoze.lru
+sudo pip3 install opencv-python pyproj Pillow joblib xmltodict scipy repoze.lru wheel six
 
 cd ../..
 git clone --recurse-submodules -j8 https://github.com/paulinus/opengv.git
@@ -27,5 +31,5 @@ sudo make install
 
 cd $DIR
 
-python setup.py build
+python3 setup.py build
 
