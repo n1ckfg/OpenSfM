@@ -47,9 +47,10 @@ cd /
 sudo rm -rf /source/opengv
 
 # Install python requirements
-sudo pip install exifread==2.1.2 gpxpy==1.1.2 networkx==1.11 numpy pyproj==1.9.5.1 pytest==3.0.7 python-dateutil==2.6.0 PyYAML==3.12 scipy xmltodict==0.10.2 loky repoze.lru
+sudo pip3 install exifread==2.1.2 gpxpy==1.1.2 networkx==1.11 numpy pyproj==1.9.5.1 pytest==3.0.7 python-dateutil==2.6.0 PyYAML==3.12 scipy xmltodict==0.10.2 loky repoze.lru
+sudo pip3 install opencv-python pyproj Pillow joblib xmltodict scipy repoze.lru
 
 cd $DIR
 
-sudo python setup.py build
+sudo python3 setup.py build
 
