@@ -18,7 +18,8 @@ brew install opencv
 brew install ceres-solver
 brew install eigen
 #sudo pip3 install -r requirements.txt
-sudo pip3 install exifread==2.1.2 gpxpy==1.1.2 networkx==1.11 numpy pyproj==1.9.5.1 pytest==3.0.7 python-dateutil==2.6.0 PyYAML==3.12 scipy xmltodict==0.10.2 loky repoze.lru
+#sudo pip3 install exifread==2.1.2 gpxpy==1.1.2 networkx==1.11 numpy pyproj==1.9.5.1 pytest==3.0.7 python-dateutil==2.6.0 PyYAML==3.12 scipy xmltodict==0.10.2 loky repoze.lru
+sudo pip3 install exifread gpxpy networkx numpy pyproj pytest python-dateutil PyYAML scipy xmltodict loky repoze.lru
 sudo pip3 install opencv-python pyproj Pillow joblib xmltodict scipy repoze.lru wheel six
 
 cd ../..
