@@ -3,9 +3,11 @@ import networkx as nx
 import numpy as np
 
 from opensfm import pybundle
+from opensfm import pygeometry
 from opensfm import geometry
 from opensfm import config
 from opensfm import types
+from opensfm import tracking
 from opensfm import reconstruction
 
 
@@ -63,7 +65,7 @@ def _projection_errors_std(points):
 def test_bundle_projection_fixed_internals(scene_synthetic):
     reference = scene_synthetic[0].get_reconstruction()
     camera_priors = {c.id: c for c in scene_synthetic[0].cameras}
-    graph = scene_synthetic[5]
+    graph = tracking.as_graph(scene_synthetic[5])
     adjusted = copy.deepcopy(reference)
 
     custom_config = config.default_config()
@@ -306,10 +308,9 @@ def test_linear_motion_prior_rotation():
 
 def test_bundle_alignment_prior():
     """Test that cameras are aligned to have the Y axis pointing down."""
-    camera = types.PerspectiveCamera()
+    camera = pygeometry.Camera.create_perspective(1.0, 0.0, 0.0)
     camera.id = 'camera1'
-    camera.focal = 1.0
-    camera.k1 = camera.k2 = 0.0
+
     shot = types.Shot()
     shot.id = '1'
     shot.camera = camera

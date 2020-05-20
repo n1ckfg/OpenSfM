@@ -180,7 +180,7 @@ def test_outliers_essential_ransac(pairs_and_their_E):
         f1 /= np.linalg.norm(f1, axis=1)[:, None]
         f2 /= np.linalg.norm(f2, axis=1)[:, None]
 
-        scale_eps_ratio = 1e-1
+        scale_eps_ratio = 0.5
         params = pyrobust.RobustEstimatorParams()
         result = pyrobust.ransac_essential(
             f1, f2, scale*(1.0+scale_eps_ratio), params, pyrobust.RansacType.RANSAC)
@@ -211,6 +211,7 @@ def test_outliers_relative_pose_ransac(pairs_and_their_E):
         result = pyrobust.ransac_relative_pose(
             f1, f2, scale*(1.0+scale_eps_ratio), params, pyrobust.RansacType.RANSAC)
 
+        pose = copy.deepcopy(pose)
         pose.translation /= np.linalg.norm(pose.translation)
         expected = pose.get_Rt()
 
