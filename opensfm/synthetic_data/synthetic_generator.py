@@ -133,7 +133,7 @@ def generate_exifs(reconstruction, gps_noise, speed_ms=10):
 
         if previous_pose is not None:
             previous_time += np.linalg.norm(pose-previous_pose)*speed_ms
-            previous_pose = pose
+        previous_pose = pose
         exif['capture_time'] = previous_time
 
         perturb_points([pose], [gps_noise, gps_noise, gps_noise])
@@ -167,7 +167,7 @@ def add_shots_to_reconstruction(positions, rotations,
     shift = len(reconstruction.shots)
     for i, item in enumerate(zip(positions, rotations)):
         shot = types.Shot()
-        shot.id = 'shot' + str(shift+i)
+        shot.id = 'shot%04d' % (shift + i)
         shot.camera = camera
         shot.pose = types.Pose()
         shot.pose.set_rotation_matrix(item[1])
