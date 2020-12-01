@@ -2,7 +2,6 @@
 
 #include <Eigen/Eigen>
 
-
 template <class T>
 using MatX = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
 using MatXf = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>;
@@ -27,6 +26,21 @@ template <class T>
 using Mat34 = Eigen::Matrix<T, 3, 4>;
 using Mat34f = Eigen::Matrix<float, 3, 4>;
 using Mat34d = Eigen::Matrix<double, 3, 4>;
+
+template <class T>
+using MatX2 = Eigen::Matrix<T, Eigen::Dynamic, 2>;
+using MatX2f = Eigen::Matrix<float, Eigen::Dynamic, 2>;
+using MatX2d = Eigen::Matrix<double, Eigen::Dynamic, 2>;
+
+template <class T>
+using MatX3 = Eigen::Matrix<T, Eigen::Dynamic, 3>;
+using MatX3f = Eigen::Matrix<float, Eigen::Dynamic, 3>;
+using MatX3d = Eigen::Matrix<double, Eigen::Dynamic, 3>;
+
+template <class T>
+using MatX4 = Eigen::Matrix<T, Eigen::Dynamic, 4>;
+using MatX4f = Eigen::Matrix<float, Eigen::Dynamic, 4>;
+using MatX4d = Eigen::Matrix<double, Eigen::Dynamic, 4>;
 
 template <class T>
 using VecX = Eigen::Matrix<T, Eigen::Dynamic, 1>;

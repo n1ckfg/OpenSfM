@@ -1,16 +1,19 @@
 import os
+
 import yaml
 
-default_config_yaml = '''
+default_config_yaml = """
 # Metadata
 use_exif_size: yes
 default_focal_prior: 0.85
 
 # Params for features
-feature_type: HAHOG           # Feature type (AKAZE, SURF, SIFT, HAHOG, ORB)
-feature_root: 1               # If 1, apply square root mapping to features
-feature_min_frames: 4000      # If fewer frames are detected, sift_peak_threshold/surf_hessian_threshold is reduced.
-feature_process_size: 2048    # Resize the image if its size is larger than specified. Set to -1 for original size
+feature_type: HAHOG                     # Feature type (AKAZE, SURF, SIFT, HAHOG, ORB)
+feature_root: 1                         # If 1, apply square root mapping to features
+feature_min_frames: 4000                # If fewer frames are detected, sift_peak_threshold/surf_hessian_threshold is reduced.
+feature_min_frames_panorama: 16000      # Same as above but for panorama images
+feature_process_size: 2048              # Resize the image if its size is larger than specified. Set to -1 for original size
+feature_process_size_panorama: 4096     # Same as above but for panorama images
 feature_use_adaptive_suppression: no
 
 # Params for SIFT
@@ -43,8 +46,10 @@ matcher_type: FLANN           # FLANN, BRUTEFORCE, or WORDS
 symmetric_matching: yes       # Match symmetricly or one-way
 
 # Params for FLANN matching
+flann_algorithm: KMEANS      # Algorithm type (KMEANS, KDTREE)
 flann_branching: 8           # See OpenCV doc
 flann_iterations: 10          # See OpenCV doc
+flann_tree: 8                # See OpenCV doc
 flann_checks: 20             # Smaller -> Faster (but might lose good matches)
 
 # Params for BoW matching
@@ -94,11 +99,12 @@ loss_function_threshold: 1      # Threshold on the squared residuals.  Usually c
 reprojection_error_sd: 0.004    # The standard deviation of the reprojection error
 exif_focal_sd: 0.01             # The standard deviation of the exif focal length in log-scale
 principal_point_sd: 0.01        # The standard deviation of the principal point coordinates
-radial_distorsion_k1_sd: 0.01   # The standard deviation of the first radial distortion parameter
-radial_distorsion_k2_sd: 0.01   # The standard deviation of the second radial distortion parameter
-radial_distorsion_k3_sd: 0.01   # The standard deviation of the third radial distortion parameter
-radial_distorsion_p1_sd: 0.01   # The standard deviation of the first tangential distortion parameter
-radial_distorsion_p2_sd: 0.01   # The standard deviation of the second tangential distortion parameter
+radial_distortion_k1_sd: 0.01   # The standard deviation of the first radial distortion parameter
+radial_distortion_k2_sd: 0.01   # The standard deviation of the second radial distortion parameter
+radial_distortion_k3_sd: 0.01   # The standard deviation of the third radial distortion parameter
+radial_distortion_k4_sd: 0.01   # The standard deviation of the fourth radial distortion parameter
+tangential_distortion_p1_sd: 0.01   # The standard deviation of the first tangential distortion parameter
+tangential_distortion_p2_sd: 0.01   # The standard deviation of the second tangential distortion parameter
 bundle_outlier_filtering_type: FIXED    # Type of threshold for filtering outlier : either fixed value (FIXED) or based on actual distribution (AUTO)
 bundle_outlier_auto_ratio: 3.0          # For AUTO filtering type, projections with larger reprojection than ratio-times-mean, are removed
 bundle_outlier_fixed_threshold: 0.006   # For FIXED filtering type, projections with larger reprojection error after bundle adjustment are removed
@@ -107,6 +113,7 @@ bundle_max_iterations: 100      # Maximum optimizer iterations.
 
 retriangulation: yes                # Retriangulate all points from time to time
 retriangulation_ratio: 1.2          # Retriangulate when the number of points grows by this ratio
+bundle_analytic_derivatives: yes    # Use analytic derivatives or auto-differentiated ones during bundle adjustment
 bundle_interval: 999999             # Bundle after adding 'bundle_interval' cameras
 bundle_new_points_ratio: 1.2        # Bundle when the number of points grows by this ratio
 local_bundle_radius: 3              # Max image graph distance for images to be included in local bundle adjustment
@@ -162,7 +169,7 @@ submodel_overlap: 30.0                                               # Radius of
 submodels_relpath: "submodels"                                       # Relative path to the submodels directory
 submodel_relpath_template: "submodels/submodel_%04d"                 # Template to generate the relative path to a submodel directory
 submodel_images_relpath_template: "submodels/submodel_%04d/images"   # Template to generate the relative path to a submodel images directory
-'''
+"""
 
 
 def default_config():

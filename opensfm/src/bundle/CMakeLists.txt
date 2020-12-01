@@ -8,7 +8,7 @@ set(BUNDLE_FILES
     src/bundle_adjuster.cc
 )
 add_library(bundle ${BUNDLE_FILES})
-target_link_libraries(bundle 
+target_link_libraries(bundle
   PRIVATE
     ${CERES_LIBRARIES}
     ${LAPACK_LIBRARIES}
@@ -21,7 +21,20 @@ endif()
 if (SUITESPARSE_FOUND)
     target_include_directories(bundle PRIVATE ${SUITESPARSE_INCLUDE_DIRS})
 endif()
-target_include_directories(bundle PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(bundle PRIVATE ${CERES_INCLUDE_DIR} ${CMAKE_SOURCE_DIR})
+
+if (OPENSFM_BUILD_TESTS)
+    set(BUNDLE_TEST_FILES
+        test/reprojection_errors_test.cc
+    )
+    add_executable(bundle_test ${BUNDLE_TEST_FILES})
+    target_include_directories(bundle_test PRIVATE ${CMAKE_SOURCE_DIR} ${EIGEN_INCLUDE_DIRS} ${GMOCK_INCLUDE_DIRS})
+    target_link_libraries(bundle_test
+                        PUBLIC
+                        bundle
+                        ${TEST_MAIN})
+    add_test(bundle_test bundle_test)
+endif()
 
 pybind11_add_module(pybundle python/pybind.cc)
 target_link_libraries(pybundle PRIVATE

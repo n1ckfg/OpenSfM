@@ -1,6 +1,6 @@
 import argparse
 
-from opensfm import commands
+from opensfm import commands, dataset
 from opensfm.test import data_generation
 
 
@@ -8,12 +8,11 @@ def run_command(command, args):
     parser = argparse.ArgumentParser()
     command.add_arguments(parser)
     parsed_args = parser.parse_args(args)
-    command.run(parsed_args)
+    command.run(dataset.DataSet(parsed_args.dataset), parsed_args)
 
 
 def test_run_all(tmpdir):
     data = data_generation.create_berlin_test_folder(tmpdir)
-
     run_all_commands = [
         commands.extract_metadata,
         commands.detect_features,
@@ -29,7 +28,7 @@ def test_run_all(tmpdir):
         commands.export_openmvs,
         commands.export_pmvs,
         commands.export_bundler,
-        commands.export_colmap
+        commands.export_colmap,
     ]
 
     for module in run_all_commands:

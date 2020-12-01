@@ -1,26 +1,13 @@
-from __future__ import absolute_import
-from __future__ import unicode_literals
-from __future__ import division
-from __future__ import print_function
-
-import errno
-import io
 import json
 import logging
 import os
-import sys
+from typing import List
 
 import cv2
 import numpy as np
 import pyproj
+from opensfm import context, features, geo, pygeometry, pymap, types
 from PIL import Image
-from six import iteritems
-
-from opensfm import geo
-from opensfm import features
-from opensfm import types
-from opensfm import context
-from opensfm import pygeometry
 
 
 logger = logging.getLogger(__name__)
@@ -31,76 +18,91 @@ def camera_from_json(key, obj):
     Read camera from a json object
     """
     camera = None
-    pt = obj.get('projection_type', 'perspective')
-    if pt == 'perspective':
+    pt = obj.get("projection_type", "perspective")
+    if pt == "perspective":
         camera = pygeometry.Camera.create_perspective(
-            obj['focal'], obj.get('k1', 0.0), obj.get('k2', 0.0))
-    elif pt == 'brown':
+            obj["focal"], obj.get("k1", 0.0), obj.get("k2", 0.0)
+        )
+    elif pt == "brown":
         camera = pygeometry.Camera.create_brown(
-            obj['focal_x'], obj['focal_y'] / obj['focal_x'],
-            [obj.get('c_x', 0.0), obj.get('c_y', 0.0)],
-            [obj.get('k1', 0.0), obj.get('k2', 0.0), obj.get('k3', 0.0),
-             obj.get('p1', 0.0), obj.get('p2', 0.0)])
-    elif pt == 'fisheye':
+            obj["focal_x"],
+            obj["focal_y"] / obj["focal_x"],
+            [obj.get("c_x", 0.0), obj.get("c_y", 0.0)],
+            [
+                obj.get("k1", 0.0),
+                obj.get("k2", 0.0),
+                obj.get("k3", 0.0),
+                obj.get("p1", 0.0),
+                obj.get("p2", 0.0),
+            ],
+        )
+    elif pt == "fisheye":
         camera = pygeometry.Camera.create_fisheye(
-            obj['focal'], obj.get('k1', 0.0), obj.get('k2', 0.0))
-    elif pt == 'dual':
-        camera = pygeometry.Camera.create_dual(obj.get('transition', 0.5), obj['focal'],
-                                               obj.get('k1', 0.0), obj.get('k2', 0.0))
-    elif pt in ['equirectangular', 'spherical']:
+            obj["focal"], obj.get("k1", 0.0), obj.get("k2", 0.0)
+        )
+    elif pt == "fisheye_opencv":
+        camera = pygeometry.Camera.create_fisheye_opencv(
+            obj["focal_x"],
+            obj["focal_y"] / obj["focal_x"],
+            [obj.get("c_x", 0.0), obj.get("c_y", 0.0)],
+            [
+                obj.get("k1", 0.0),
+                obj.get("k2", 0.0),
+                obj.get("k3", 0.0),
+                obj.get("k4", 0.0),
+            ],
+        )
+    elif pt == "dual":
+        camera = pygeometry.Camera.create_dual(
+            obj.get("transition", 0.5),
+            obj["focal"],
+            obj.get("k1", 0.0),
+            obj.get("k2", 0.0),
+        )
+    elif pygeometry.Camera.is_panorama(pt):
         camera = pygeometry.Camera.create_spherical()
     else:
         raise NotImplementedError
     camera.id = key
-    camera.width = int(obj.get('width', 0))
-    camera.height = int(obj.get('height', 0))
+    camera.width = int(obj.get("width", 0))
+    camera.height = int(obj.get("height", 0))
     return camera
 
 
-def shot_from_json(key, obj, cameras):
+def shot_from_json(reconstruction, key, obj, is_pano_shot=False):
     """
     Read shot from a json object
     """
-    pose = types.Pose()
+    pose = pygeometry.Pose()
     pose.rotation = obj["rotation"]
     if "translation" in obj:
         pose.translation = obj["translation"]
 
-    metadata = types.ShotMetadata()
-    metadata.orientation = obj.get("orientation")
-    metadata.capture_time = obj.get("capture_time")
-    metadata.gps_dop = obj.get("gps_dop")
-    metadata.gps_position = obj.get("gps_position")
-    metadata.skey = obj.get("skey")
+    if is_pano_shot:
+        shot = reconstruction.create_pano_shot(key, obj["camera"], pose)
+    else:
+        shot = reconstruction.create_shot(key, obj["camera"], pose)
+    shot.metadata = json_to_pymap_metadata(obj)
 
-    shot = types.Shot()
-    shot.id = key
-    shot.metadata = metadata
-    shot.pose = pose
-    shot.camera = cameras.get(obj["camera"])
-
-    if 'scale' in obj:
-        shot.scale = obj['scale']
-    if 'covariance' in obj:
-        shot.covariance = np.array(obj['covariance'])
-    if 'merge_cc' in obj:
-        shot.merge_cc = obj['merge_cc']
-    if 'vertices' in obj and 'faces' in obj:
-        shot.mesh = types.ShotMesh()
-        shot.mesh.vertices = obj['vertices']
-        shot.mesh.faces = obj['faces']
+    if "scale" in obj:
+        shot.scale = obj["scale"]
+    if "covariance" in obj:
+        shot.covariance = np.array(obj["covariance"])
+    if "merge_cc" in obj:
+        shot.merge_cc = obj["merge_cc"]
+    if "vertices" in obj and "faces" in obj:
+        shot.mesh.vertices = obj["vertices"]
+        shot.mesh.faces = obj["faces"]
 
     return shot
 
 
-def point_from_json(key, obj):
+def point_from_json(reconstruction, key, obj):
     """
     Read a point from a json object
     """
-    point = types.Point()
-    point.id = key
+    point = reconstruction.create_point(key, obj["coordinates"])
     point.color = obj["color"]
-    point.coordinates = obj["coordinates"]
     return point
 
 
@@ -111,39 +113,37 @@ def reconstruction_from_json(obj):
     reconstruction = types.Reconstruction()
 
     # Extract cameras
-    for key, value in iteritems(obj['cameras']):
+    for key, value in obj["cameras"].items():
         camera = camera_from_json(key, value)
         reconstruction.add_camera(camera)
 
     # Extract shots
-    for key, value in iteritems(obj['shots']):
-        shot = shot_from_json(key, value, reconstruction.cameras)
-        reconstruction.add_shot(shot)
+    for key, value in obj["shots"].items():
+        shot_from_json(reconstruction, key, value)
 
     # Extract points
-    if 'points' in obj:
-        for key, value in iteritems(obj['points']):
-            point = point_from_json(key, value)
-            reconstruction.add_point(point)
+    if "points" in obj:
+        for key, value in obj["points"].items():
+            point_from_json(reconstruction, key, value)
 
     # Extract pano_shots
-    if 'pano_shots' in obj:
-        reconstruction.pano_shots = {}
-        for key, value in iteritems(obj['pano_shots']):
-            shot = shot_from_json(key, value, reconstruction.cameras)
-            reconstruction.pano_shots[shot.id] = shot
+    if "pano_shots" in obj:
+        for key, value in obj["pano_shots"].items():
+            is_pano_shot = True
+            shot_from_json(reconstruction, key, value, is_pano_shot)
 
     # Extract main and unit shots
-    if 'main_shot' in obj:
-        reconstruction.main_shot = obj['main_shot']
-    if 'unit_shot' in obj:
-        reconstruction.unit_shot = obj['unit_shot']
+    if "main_shot" in obj:
+        reconstruction.main_shot = obj["main_shot"]
+    if "unit_shot" in obj:
+        reconstruction.unit_shot = obj["unit_shot"]
 
     # Extract reference topocentric frame
-    if 'reference_lla' in obj:
-        lla = obj['reference_lla']
+    if "reference_lla" in obj:
+        lla = obj["reference_lla"]
         reconstruction.reference = geo.TopocentricConverter(
-            lla['latitude'], lla['longitude'], lla['altitude'])
+            lla["latitude"], lla["longitude"], lla["altitude"]
+        )
 
     return reconstruction
 
@@ -160,7 +160,7 @@ def cameras_from_json(obj):
     Read cameras from a json object
     """
     cameras = {}
-    for key, value in iteritems(obj):
+    for key, value in obj.items():
         cameras[key] = camera_from_json(key, value)
     return cameras
 
@@ -169,54 +169,68 @@ def camera_to_json(camera):
     """
     Write camera to a json object
     """
-    if camera.projection_type == 'perspective':
+    if camera.projection_type == "perspective":
         return {
-            'projection_type': camera.projection_type,
-            'width': camera.width,
-            'height': camera.height,
-            'focal': camera.focal,
-            'k1': camera.k1,
-            'k2': camera.k2,
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
+            "focal": camera.focal,
+            "k1": camera.k1,
+            "k2": camera.k2,
         }
-    elif camera.projection_type == 'brown':
+    elif camera.projection_type == "brown":
         return {
-            'projection_type': camera.projection_type,
-            'width': camera.width,
-            'height': camera.height,
-            'focal_x': camera.focal,
-            'focal_y': camera.focal*camera.aspect_ratio,
-            'c_x': camera.principal_point[0],
-            'c_y': camera.principal_point[1],
-            'k1': camera.k1,
-            'k2': camera.k2,
-            'p1': camera.p1,
-            'p2': camera.p2,
-            'k3': camera.k3,
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
+            "focal_x": camera.focal,
+            "focal_y": camera.focal * camera.aspect_ratio,
+            "c_x": camera.principal_point[0],
+            "c_y": camera.principal_point[1],
+            "k1": camera.k1,
+            "k2": camera.k2,
+            "p1": camera.p1,
+            "p2": camera.p2,
+            "k3": camera.k3,
         }
-    elif camera.projection_type == 'fisheye':
+    elif camera.projection_type == "fisheye":
         return {
-            'projection_type': camera.projection_type,
-            'width': camera.width,
-            'height': camera.height,
-            'focal': camera.focal,
-            'k1': camera.k1,
-            'k2': camera.k2,
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
+            "focal": camera.focal,
+            "k1": camera.k1,
+            "k2": camera.k2,
         }
-    elif camera.projection_type == 'dual':
+    elif camera.projection_type == "fisheye_opencv":
         return {
-            'projection_type': camera.projection_type,
-            'width': camera.width,
-            'height': camera.height,
-            'focal': camera.focal,
-            'k1': camera.k1,
-            'k2': camera.k2,
-            'transition': camera.transition
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
+            "focal_x": camera.focal,
+            "focal_y": camera.focal * camera.aspect_ratio,
+            "c_x": camera.principal_point[0],
+            "c_y": camera.principal_point[1],
+            "k1": camera.k1,
+            "k2": camera.k2,
+            "k3": camera.k3,
+            "k4": camera.k4,
         }
-    elif camera.projection_type in ['equirectangular', 'spherical']:
+    elif camera.projection_type == "dual":
         return {
-            'projection_type': camera.projection_type,
-            'width': camera.width,
-            'height': camera.height
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
+            "focal": camera.focal,
+            "k1": camera.k1,
+            "k2": camera.k2,
+            "transition": camera.transition,
+        }
+    elif pygeometry.Camera.is_panorama(camera.projection_type):
+        return {
+            "projection_type": camera.projection_type,
+            "width": camera.width,
+            "height": camera.height,
         }
     else:
         raise NotImplementedError
@@ -227,35 +241,73 @@ def shot_to_json(shot):
     Write shot to a json object
     """
     obj = {
-        'rotation': list(shot.pose.rotation),
-        'translation': list(shot.pose.translation),
-        'camera': shot.camera.id
+        "rotation": list(shot.pose.rotation),
+        "translation": list(shot.pose.translation),
+        "camera": shot.camera.id,
     }
+
     if shot.metadata is not None:
-        if shot.metadata.orientation is not None:
-            obj['orientation'] = shot.metadata.orientation
-        if shot.metadata.capture_time is not None:
-            obj['capture_time'] = shot.metadata.capture_time
-        if shot.metadata.gps_dop is not None:
-            obj['gps_dop'] = shot.metadata.gps_dop
-        if shot.metadata.gps_position is not None:
-            obj['gps_position'] = shot.metadata.gps_position
-        if shot.metadata.accelerometer is not None:
-            obj['accelerometer'] = shot.metadata.accelerometer
-        if shot.metadata.compass is not None:
-            obj['compass'] = shot.metadata.compass
-        if shot.metadata.skey is not None:
-            obj['skey'] = shot.metadata.skey
+        obj.update(pymap_metadata_to_json(shot.metadata))
     if shot.mesh is not None:
-        obj['vertices'] = shot.mesh.vertices
-        obj['faces'] = shot.mesh.faces
-    if hasattr(shot, 'scale'):
-        obj['scale'] = shot.scale
-    if hasattr(shot, 'covariance'):
-        obj['covariance'] = shot.covariance.tolist()
-    if hasattr(shot, 'merge_cc'):
-        obj['merge_cc'] = shot.merge_cc
+        obj["vertices"] = [list(vertice) for vertice in shot.mesh.vertices]
+        obj["faces"] = [list(face) for face in shot.mesh.faces]
+    if hasattr(shot, "scale"):
+        obj["scale"] = shot.scale
+    if hasattr(shot, "covariance"):
+        obj["covariance"] = shot.covariance.tolist()
+    if hasattr(shot, "merge_cc"):
+        obj["merge_cc"] = shot.merge_cc
     return obj
+
+
+def pymap_metadata_to_json(metadata):
+    obj = {}
+    if metadata.orientation.has_value:
+        obj["orientation"] = metadata.orientation.value
+    if metadata.capture_time.has_value:
+        obj["capture_time"] = metadata.capture_time.value
+    if metadata.gps_accuracy.has_value:
+        obj["gps_dop"] = metadata.gps_accuracy.value
+    if metadata.gps_position.has_value:
+        obj["gps_position"] = list(metadata.gps_position.value)
+    if metadata.accelerometer.has_value:
+        obj["accelerometer"] = list(metadata.accelerometer.value)
+    if metadata.compass_angle.has_value and metadata.compass_accuracy.has_value:
+        obj["compass"] = {
+            "angle": metadata.compass_angle.value,
+            "accuracy": metadata.compass_accuracy.value,
+        }
+    else:
+        if metadata.compass_angle.has_value:
+            obj["compass"] = {"angle": metadata.compass_angle.value}
+        elif metadata.compass_accuracy.has_value:
+            obj["compass"] = {"accuracy": metadata.compass_accuracy.value}
+    if metadata.sequence_key.has_value:
+        obj["skey"] = metadata.sequence_key.value
+    return obj
+
+
+def json_to_pymap_metadata(obj):
+    metadata = pymap.ShotMeasurements()
+    if obj.get("orientation") is not None:
+        metadata.orientation.value = obj.get("orientation")
+    if obj.get("capture_time") is not None:
+        metadata.capture_time.value = obj.get("capture_time")
+    if obj.get("gps_dop") is not None:
+        metadata.gps_accuracy.value = obj.get("gps_dop")
+    if obj.get("gps_position") is not None:
+        metadata.gps_position.value = obj.get("gps_position")
+    if obj.get("skey") is not None:
+        metadata.sequence_key.value = obj.get("skey")
+    if obj.get("accelerometer") is not None:
+        metadata.accelerometer.value = obj.get("accelerometer")
+    if obj.get("compass") is not None:
+        compass = obj.get("compass")
+        if "angle" in compass:
+            metadata.compass_angle.value = compass["angle"]
+        if "accuracy" in compass:
+            metadata.compass_accuracy.value = compass["accuracy"]
+    return metadata
 
 
 def point_to_json(point):
@@ -263,8 +315,8 @@ def point_to_json(point):
     Write a point to a json object
     """
     return {
-        'color': list(point.color),
-        'coordinates': list(point.coordinates)
+        "color": list(point.color.astype(float)),
+        "coordinates": list(point.coordinates),
     }
 
 
@@ -272,43 +324,40 @@ def reconstruction_to_json(reconstruction):
     """
     Write a reconstruction to a json object
     """
-    obj = {
-        "cameras": {},
-        "shots": {},
-        "points": {}
-    }
+    obj = {"cameras": {}, "shots": {}, "points": {}}
 
     # Extract cameras
     for camera in reconstruction.cameras.values():
-        obj['cameras'][camera.id] = camera_to_json(camera)
+        obj["cameras"][camera.id] = camera_to_json(camera)
 
     # Extract shots
     for shot in reconstruction.shots.values():
-        obj['shots'][shot.id] = shot_to_json(shot)
+        obj["shots"][shot.id] = shot_to_json(shot)
 
     # Extract points
     for point in reconstruction.points.values():
-        obj['points'][point.id] = point_to_json(point)
+        obj["points"][point.id] = point_to_json(point)
 
     # Extract pano_shots
-    if hasattr(reconstruction, 'pano_shots'):
-        obj['pano_shots'] = {}
-        for shot in reconstruction.pano_shots.values():
-            obj['pano_shots'][shot.id] = shot_to_json(shot)
+    if hasattr(reconstruction, "pano_shots"):
+        if len(reconstruction.pano_shots) > 0:
+            obj["pano_shots"] = {}
+            for shot in reconstruction.pano_shots.values():
+                obj["pano_shots"][shot.id] = shot_to_json(shot)
 
     # Extract main and unit shots
-    if hasattr(reconstruction, 'main_shot'):
-        obj['main_shot'] = reconstruction.main_shot
-    if hasattr(reconstruction, 'unit_shot'):
-        obj['unit_shot'] = reconstruction.unit_shot
+    if hasattr(reconstruction, "main_shot"):
+        obj["main_shot"] = reconstruction.main_shot
+    if hasattr(reconstruction, "unit_shot"):
+        obj["unit_shot"] = reconstruction.unit_shot
 
     # Extract reference topocentric frame
     if reconstruction.reference:
         ref = reconstruction.reference
-        obj['reference_lla'] = {
-            'latitude': ref.lat,
-            'longitude': ref.lon,
-            'altitude': ref.alt,
+        obj["reference_lla"] = {
+            "latitude": ref.lat,
+            "longitude": ref.lon,
+            "altitude": ref.alt,
         }
 
     return obj
@@ -329,6 +378,87 @@ def cameras_to_json(cameras):
     for camera in cameras.values():
         obj[camera.id] = camera_to_json(camera)
     return obj
+
+
+def camera_from_vector(
+    camera_id: str,
+    width: int,
+    height: int,
+    projection_type: str,
+    parameters: List[float],
+) -> pygeometry.Camera:
+    """Build a camera from a serialized vector of parameters."""
+    if projection_type == "perspective":
+        focal, k1, k2 = parameters
+        camera = pygeometry.Camera.create_perspective(focal, k1, k2)
+    elif projection_type == "brown":
+        fx, fy, cx, cy, k1, k2, p1, p2, k3 = parameters
+        camera = pygeometry.Camera.create_brown(
+            fx, fy / fx, [cx, cy], [k1, k2, k3, p1, p2]
+        )
+    elif projection_type == "fisheye":
+        focal, k1, k2 = parameters
+        camera = pygeometry.Camera.create_fisheye(focal, k1, k2)
+    elif projection_type == "fisheye_opencv":
+        fx, fy, cx, cy, k1, k2, k3, k4 = parameters
+        camera = pygeometry.Camera.create_fisheye_opencv(
+            fx, fy / fx, [cx, cy], [k1, k2, k3, k4]
+        )
+    elif projection_type == "dual":
+        focal, k1, k2, transition = parameters
+        camera = pygeometry.Camera.create_dual(transition, focal, k1, k2)
+    elif pygeometry.Camera.is_panorama(projection_type):
+        camera = pygeometry.Camera.create_spherical()
+    else:
+        raise NotImplementedError
+    camera.id = camera_id
+    camera.width = width
+    camera.height = height
+    return camera
+
+
+def camera_to_vector(camera: pygeometry.Camera) -> List[float]:
+    """Serialize camera parameters to a vector of floats."""
+    if camera.projection_type == "perspective":
+        parameters = [camera.focal, camera.k1, camera.k2]
+    elif camera.projection_type == "brown":
+        parameters = [
+            camera.focal,
+            camera.focal * camera.aspect_ratio,
+            camera.principal_point[0],
+            camera.principal_point[1],
+            camera.k1,
+            camera.k2,
+            camera.p1,
+            camera.p2,
+            camera.k3,
+        ]
+    elif camera.projection_type == "fisheye":
+        parameters = [camera.focal, camera.k1, camera.k2]
+    elif camera.projection_type == "fisheye_opencv":
+        parameters = [
+            camera.focal,
+            camera.focal * camera.aspect_ratio,
+            camera.principal_point[0],
+            camera.principal_point[1],
+            camera.k1,
+            camera.k2,
+            camera.k3,
+            camera.k4,
+        ]
+    elif camera.projection_type == "dual":
+        parameters = [
+            camera.focal,
+            camera.k1,
+            camera.k2,
+            camera.transition,
+        ]
+    elif pygeometry.Camera.is_panorama(camera.projection_type):
+        parameters = []
+    else:
+        raise NotImplementedError
+
+    return parameters
 
 
 def _read_gcp_list_lines(lines, projection, reference, exif):
@@ -353,28 +483,29 @@ def _read_gcp_list_lines(lines, projection, reference, exif):
             else:
                 lon, lat = easting, northing
 
-            point = types.GroundControlPoint()
+            point = pymap.GroundControlPoint()
             point.id = "unnamed-%d" % len(points)
-            point.lla = np.array([lat, lon, alt])
+            point.lla = {"latitude": lat, "longitude": lon, "altitude": alt}
             point.has_altitude = has_altitude
 
             if reference:
                 x, y, z = reference.to_topocentric(lat, lon, alt)
-                point.coordinates = np.array([x, y, z])
+                point.coordinates.value = np.array([x, y, z])
             else:
-                point.coordinates = None
+                point.coordinates.reset()
 
             points[key] = point
 
         # Convert 2D coordinates
         d = exif[shot_id]
         coordinates = features.normalized_image_coordinates(
-            np.array([[pixel_x, pixel_y]]), d['width'], d['height'])[0]
+            np.array([[pixel_x, pixel_y]]), d["width"], d["height"]
+        )[0]
 
-        o = types.GroundControlPointObservation()
+        o = pymap.GroundControlPointObservation()
         o.shot_id = shot_id
         o.projection = coordinates
-        point.observations.append(o)
+        point.add_observation(o)
 
     return list(points.values())
 
@@ -384,26 +515,26 @@ def _parse_utm_projection_string(line):
     words = line.lower().split()
     assert len(words) == 3
     zone = line.split()[2].upper()
-    if zone[-1] == 'N':
+    if zone[-1] == "N":
         zone_number = int(zone[:-1])
-        zone_hemisphere = 'north'
-    elif zone[-1] == 'S':
+        zone_hemisphere = "north"
+    elif zone[-1] == "S":
         zone_number = int(zone[:-1])
-        zone_hemisphere = 'south'
+        zone_hemisphere = "south"
     else:
         zone_number = int(zone)
-        zone_hemisphere = 'north'
-    s = '+proj=utm +zone={} +{} +ellps=WGS84 +datum=WGS84 +units=m +no_defs'
+        zone_hemisphere = "north"
+    s = "+proj=utm +zone={} +{} +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
     return s.format(zone_number, zone_hemisphere)
 
 
 def _parse_projection(line):
     """Build a proj4 from the GCP format line."""
-    if line.strip() == 'WGS84':
+    if line.strip() == "WGS84":
         return None
-    elif line.upper().startswith('WGS84 UTM'):
+    elif line.upper().startswith("WGS84 UTM"):
         return pyproj.Proj(_parse_utm_projection_string(line))
-    elif '+proj' in line:
+    elif "+proj" in line:
         return pyproj.Proj(line)
     else:
         raise ValueError("Un-supported geo system definition: {}".format(line))
@@ -411,7 +542,7 @@ def _parse_projection(line):
 
 def _valid_gcp_line(line):
     stripped = line.strip()
-    return stripped and stripped[0] != '#'
+    return stripped and stripped[0] != "#"
 
 
 def read_gcp_list(fileobj, reference, exif):
@@ -435,32 +566,38 @@ def read_ground_control_points(fileobj, reference):
     obj = json_load(fileobj)
 
     points = []
-    for point_dict in obj['points']:
-        point = types.GroundControlPoint()
-        point.id = point_dict['id']
-        point.lla = point_dict.get('position')
-        if point.lla:
-            point.has_altitude = ('altitude' in point.lla)
+    for point_dict in obj["points"]:
+        point = pymap.GroundControlPoint()
+        point.id = point_dict["id"]
+        lla = point_dict.get("position")
+        if lla:
+            point.lla = lla
+            point.has_altitude = "altitude" in point.lla
             if reference:
-                point.coordinates = reference.to_topocentric(
-                    point.lla['latitude'],
-                    point.lla['longitude'],
-                    point.lla.get('altitude', 0))
+                point.coordinates.value = reference.to_topocentric(
+                    point.lla["latitude"],
+                    point.lla["longitude"],
+                    point.lla.get("altitude", 0),
+                )
             else:
-                point.coordinates = None
+                point.coordinates.reset()
 
-        point.observations = []
+        observations = []
         observing_images = set()
-        for o_dict in point_dict['observations']:
-            o = types.GroundControlPointObservation()
-            o.shot_id = o_dict['shot_id']
+        for o_dict in point_dict["observations"]:
+            o = pymap.GroundControlPointObservation()
+            o.shot_id = o_dict["shot_id"]
             if o.shot_id in observing_images:
-                logger.warning("GCP {} has multiple observations in image {}"
-                               .format(point.id, o.shot_id))
+                logger.warning(
+                    "GCP {} has multiple observations in image {}".format(
+                        point.id, o.shot_id
+                    )
+                )
             observing_images.add(o.shot_id)
-            if 'projection' in o_dict:
-                o.projection = np.array(o_dict['projection'])
-            point.observations.append(o)
+            if "projection" in o_dict:
+                o.projection = np.array(o_dict["projection"])
+            observations.append(o)
+        point.observations = observations
         points.append(point)
     return points
 
@@ -471,158 +608,68 @@ def write_ground_control_points(gcp, fileobj, reference):
 
     for point in gcp:
         point_obj = {}
-        point_obj['id'] = point.id
+        point_obj["id"] = point.id
         if point.lla:
-            point_obj['position'] = {
-                'latitude': point.lla['latitude'],
-                'longitude': point.lla['longitude'],
+            point_obj["position"] = {
+                "latitude": point.lla["latitude"],
+                "longitude": point.lla["longitude"],
             }
             if point.has_altitude:
-                point_obj['position']['altitude'] = point.lla['altitude']
-        elif point.coordinates:
-            lat, lon, alt = reference.to_lla(*point.coordinates)
-            point_obj['position'] = {
-                'latitude': lat,
-                'longitude': lon,
+                point_obj["position"]["altitude"] = point.lla["altitude"]
+        elif point.coordinates.has_value:
+            lat, lon, alt = reference.to_lla(*point.coordinates.value)
+            point_obj["position"] = {
+                "latitude": lat,
+                "longitude": lon,
             }
             if point.has_altitude:
-                point_obj['position']['altitude'] = alt
+                point_obj["position"]["altitude"] = alt
 
-        point_obj['observations'] = []
+        point_obj["observations"] = []
         for observation in point.observations:
-            point_obj['observations'].append({
-                'shot_id': observation.shot_id,
-                'projection': tuple(observation.projection),
-            })
+            point_obj["observations"].append(
+                {
+                    "shot_id": observation.shot_id,
+                    "projection": tuple(observation.projection),
+                }
+            )
 
-        obj['points'].append(point_obj)
+        obj["points"].append(point_obj)
 
     json_dump(obj, fileobj)
 
 
 def mkdir_p(path):
-    '''Make a directory including parent directories.
-    '''
-    try:
-        os.makedirs(path)
-    except os.error as exc:
-        if exc.errno != errno.EEXIST or not os.path.isdir(path):
-            raise
+    """Make a directory including parent directories."""
+    return os.makedirs(path, exist_ok=True)
 
 
 def open_wt(path):
     """Open a file in text mode for writing utf-8."""
-    return io.open(path, 'w', encoding='utf-8')
+    return open(path, "w", encoding="utf-8")
 
 
 def open_rt(path):
     """Open a file in text mode for reading utf-8."""
-    return io.open(path, 'r', encoding='utf-8')
-
-
-def _json_dump_python_2_pached(
-        obj, fp, skipkeys=False, ensure_ascii=True, check_circular=True,
-        allow_nan=True, cls=None, indent=None, separators=None,
-        encoding='utf-8', default=None, sort_keys=False, **kw):
-    """Serialize ``obj`` as a JSON formatted stream to ``fp`` (a
-    ``.write()``-supporting file-like object).
-
-    If ``skipkeys`` is true then ``dict`` keys that are not basic types
-    (``str``, ``unicode``, ``int``, ``long``, ``float``, ``bool``, ``None``)
-    will be skipped instead of raising a ``TypeError``.
-
-    If ``ensure_ascii`` is true (the default), all non-ASCII characters in the
-    output are escaped with ``\\uXXXX`` sequences, and the result is a ``str``
-    instance consisting of ASCII characters only.  If ``ensure_ascii`` is
-    ``False``, some chunks written to ``fp`` may be ``unicode`` instances.
-    This usually happens because the input contains unicode strings or the
-    ``encoding`` parameter is used. Unless ``fp.write()`` explicitly
-    understands ``unicode`` (as in ``codecs.getwriter``) this is likely to
-    cause an error.
-
-    If ``check_circular`` is false, then the circular reference check
-    for container types will be skipped and a circular reference will
-    result in an ``OverflowError`` (or worse).
-
-    If ``allow_nan`` is false, then it will be a ``ValueError`` to
-    serialize out of range ``float`` values (``nan``, ``inf``, ``-inf``)
-    in strict compliance of the JSON specification, instead of using the
-    JavaScript equivalents (``NaN``, ``Infinity``, ``-Infinity``).
-
-    If ``indent`` is a non-negative integer, then JSON array elements and
-    object members will be pretty-printed with that indent level. An indent
-    level of 0 will only insert newlines. ``None`` is the most compact
-    representation.  Since the default item separator is ``', '``,  the
-    output might include trailing whitespace when ``indent`` is specified.
-    You can use ``separators=(',', ': ')`` to avoid this.
-
-    If ``separators`` is an ``(item_separator, dict_separator)`` tuple
-    then it will be used instead of the default ``(', ', ': ')`` separators.
-    ``(',', ':')`` is the most compact JSON representation.
-
-    ``encoding`` is the character encoding for str instances, default is UTF-8.
-
-    ``default(obj)`` is a function that should return a serializable version
-    of obj or raise TypeError. The default simply raises TypeError.
-
-    If *sort_keys* is ``True`` (default: ``False``), then the output of
-    dictionaries will be sorted by key.
-
-    To use a custom ``JSONEncoder`` subclass (e.g. one that overrides the
-    ``.default()`` method to serialize additional types), specify it with
-    the ``cls`` kwarg; otherwise ``JSONEncoder`` is used.
-
-    """
-    # cached encoder
-    if (not skipkeys and ensure_ascii and
-            check_circular and allow_nan and
-            cls is None and indent is None and separators is None and
-            encoding == 'utf-8' and default is None and not sort_keys and
-            not kw):
-        iterable = json._default_encoder.iterencode(obj)
-    else:
-        if cls is None:
-            cls = json.JSONEncoder
-        iterable = cls(
-            skipkeys=skipkeys, ensure_ascii=ensure_ascii,
-            check_circular=check_circular, allow_nan=allow_nan, indent=indent,
-            separators=separators, encoding=encoding,
-            default=default, sort_keys=sort_keys, **kw).iterencode(obj)
-    # could accelerate with writelines in some versions of Python, at
-    # a debuggability cost
-    for chunk in iterable:
-        fp.write(unicode(chunk))  # Convert chunks to unicode before writing
+    return open(path, "r", encoding="utf-8")
 
 
 def json_dump_kwargs(minify=False):
     if minify:
-        indent, separators = None, (',', ':')
+        indent, separators = None, (",", ":")
     else:
         indent, separators = 4, None
-    return dict(indent=indent, ensure_ascii=False,
-                separators=separators)
+    return {"indent": indent, "ensure_ascii": False, "separators": separators}
 
 
 def json_dump(data, fout, minify=False):
     kwargs = json_dump_kwargs(minify)
-    if sys.version_info >= (3, 0):
-        return json.dump(data, fout, **kwargs)
-    else:
-        # Python 2 json decoders can unpredictably return str or unicode
-        # We use a patched json.dump function to always convert to unicode
-        # See https://bugs.python.org/issue13769
-        return _json_dump_python_2_pached(data, fout, **kwargs)
+    return json.dump(data, fout, **kwargs)
 
 
 def json_dumps(data, minify=False):
     kwargs = json_dump_kwargs(minify)
-    if sys.version_info >= (3, 0):
-        return json.dumps(data, **kwargs)
-    else:
-        # Python 2 json decoders can unpredictably return str or unicode.
-        # We use always convert to unicode
-        # See https://bugs.python.org/issue13769
-        return unicode(json.dumps(data, **kwargs))
+    return json.dumps(data, **kwargs)
 
 
 def json_load(fp):
@@ -649,8 +696,9 @@ def imread(filename, grayscale=False, unchanged=False, anydepth=False):
             logger.warning(
                 "OpenCV version {} does not support loading images without "
                 "rotating them according to EXIF. Please upgrade OpenCV to "
-                "version 3.2 or newer.".format(cv2.__version__))
-        
+                "version 3.2 or newer.".format(cv2.__version__)
+            )
+
         if anydepth:
             flags |= cv2.IMREAD_ANYDEPTH
     else:
@@ -687,7 +735,7 @@ def image_size(filename):
         with Image.open(filename) as img:
             width, height = img.size
             return height, width
-    except:
+    except Exception:
         # Slower fallback
         image = imread(filename)
         return image.shape[:2]
@@ -695,8 +743,10 @@ def image_size(filename):
 
 # Bundler
 
-def export_bundler(image_list, reconstructions, track_manager,
-                   bundle_file_path, list_file_path):
+
+def export_bundler(
+    image_list, reconstructions, track_manager, bundle_file_path, list_file_path
+):
     """
     Generate a reconstruction file that is consistent with Bundler's format
     """
@@ -711,7 +761,7 @@ def export_bundler(image_list, reconstructions, track_manager,
         shots = reconstruction.shots
         num_point = len(points)
         num_shot = len(image_list)
-        lines.append(' '.join(map(str, [num_shot, num_point])))
+        lines.append(" ".join(map(str, [num_shot, num_point])))
         shots_order = {key: i for i, key in enumerate(image_list)}
 
         # cameras
@@ -719,7 +769,7 @@ def export_bundler(image_list, reconstructions, track_manager,
             if shot_id in shots:
                 shot = shots[shot_id]
                 camera = shot.camera
-                if type(camera) == types.BrownPerspectiveCamera:
+                if shot.camera.projection_type == "brown":
                     # Will aproximate Brown model, not optimal
                     focal_normalized = camera.focal_x
                 else:
@@ -732,22 +782,22 @@ def export_bundler(image_list, reconstructions, track_manager,
                 t = np.array(shot.pose.translation)
                 R[1], R[2] = -R[1], -R[2]  # Reverse y and z
                 t[1], t[2] = -t[1], -t[2]
-                lines.append(' '.join(map(str, [focal, k1, k2])))
+                lines.append(" ".join(map(str, [focal, k1, k2])))
                 for i in range(3):
-                    lines.append(' '.join(map(str, R[i])))
-                t = ' '.join(map(str, t))
+                    lines.append(" ".join(map(str, R[i])))
+                t = " ".join(map(str, t))
                 lines.append(t)
             else:
-                for i in range(5):
+                for _ in range(5):
                     lines.append("0 0 0")
 
         # tracks
-        for point_id, point in iteritems(points):
+        for point in points.values():
             coord = point.coordinates
             color = list(map(int, point.color))
             view_list = track_manager.get_track_observations(point.id)
-            lines.append(' '.join(map(str, coord)))
-            lines.append(' '.join(map(str, color)))
+            lines.append(" ".join(map(str, coord)))
+            lines.append(" ".join(map(str, color)))
             view_line = []
             for shot_key, obs in view_list.items():
                 if shot_key in shots.keys():
@@ -757,24 +807,24 @@ def export_bundler(image_list, reconstructions, track_manager,
                     scale = max(camera.width, camera.height)
                     x = v[0] * scale
                     y = -v[1] * scale
-                    view_line.append(' '.join(
-                        map(str, [shot_index, obs.id, x, y])))
+                    view_line.append(" ".join(map(str, [shot_index, obs.id, x, y])))
 
-            lines.append(str(len(view_line)) + ' ' + ' '.join(view_line))
+            lines.append(str(len(view_line)) + " " + " ".join(view_line))
 
-        bundle_file = os.path.join(bundle_file_path,
-                                   'bundle_r' + str(j).zfill(3) + '.out')
+        bundle_file = os.path.join(
+            bundle_file_path, "bundle_r" + str(j).zfill(3) + ".out"
+        )
         with open_wt(bundle_file) as fout:
-            fout.writelines('\n'.join(lines) + '\n')
+            fout.writelines("\n".join(lines) + "\n")
 
-        list_file = os.path.join(list_file_path,
-                                 'list_r' + str(j).zfill(3) + '.out')
+        list_file = os.path.join(list_file_path, "list_r" + str(j).zfill(3) + ".out")
         with open_wt(list_file) as fout:
-            fout.writelines('\n'.join(map(str, image_list)))
+            fout.writelines("\n".join(map(str, image_list)))
 
 
-def import_bundler(data_path, bundle_file, list_file, track_file,
-                   reconstruction_file=None):
+def import_bundler(
+    data_path, bundle_file, list_file, track_file, reconstruction_file=None
+):
     """
     Reconstruction and tracks graph from Bundler's output
     """
@@ -793,8 +843,8 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
         rel_to_data = os.path.relpath(image_path, data_path)
         image_list.append(rel_to_data)
         ordered_shots.append(os.path.basename(image_path))
-    with open_wt(os.path.join(data_path, 'image_list.txt')) as fout:
-        fout.write('\n'.join(image_list) + '\n')
+    with open_wt(os.path.join(data_path, "image_list.txt")) as fout:
+        fout.write("\n".join(image_list) + "\n")
 
     # Check for bundle_file
     if not bundle_file or not os.path.isfile(bundle_file):
@@ -802,10 +852,10 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
 
     with open_rt(bundle_file) as fin:
         lines = fin.readlines()
-    offset = 1 if '#' in lines[0] else 0
+    offset = 1 if "#" in lines[0] else 0
 
     # header
-    num_shot, num_point = map(int, lines[offset].split(' '))
+    num_shot, num_point = map(int, lines[offset].split(" "))
     offset += 1
 
     # initialization
@@ -815,13 +865,15 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
     for i in range(num_shot):
         # Creating a model for each shot.
         shot_key = ordered_shots[i]
-        focal, k1, k2 = map(float, lines[offset].rstrip('\n').split(' '))
+        focal, k1, k2 = map(float, lines[offset].rstrip("\n").split(" "))
 
         if focal > 0:
             im = imread(os.path.join(data_path, image_list[i]))
             height, width = im.shape[0:2]
-            camera = pygeometry.Camera.create_perspective(focal / max(width, height), k1, k2)
-            camera.id = 'camera_' + str(i)
+            camera = pygeometry.Camera.create_perspective(
+                focal / max(width, height), k1, k2
+            )
+            camera.id = "camera_" + str(i)
             camera.width = width
             camera.height = height
             reconstruction.add_camera(camera)
@@ -829,37 +881,31 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
             # Shots
             rline = []
             for k in range(3):
-                rline += lines[offset + 1 + k].rstrip('\n').split(' ')
-            R = ' '.join(rline)
-            t = lines[offset + 4].rstrip('\n').split(' ')
+                rline += lines[offset + 1 + k].rstrip("\n").split(" ")
+            R = " ".join(rline)
+            t = lines[offset + 4].rstrip("\n").split(" ")
             R = np.array(list(map(float, R.split()))).reshape(3, 3)
             t = np.array(list(map(float, t)))
             R[1], R[2] = -R[1], -R[2]  # Reverse y and z
             t[1], t[2] = -t[1], -t[2]
+            pose = pygeometry.Pose()
+            pose.set_rotation_matrix(R)
+            pose.translation = t
 
-            shot = types.Shot()
-            shot.id = shot_key
-            shot.camera = camera
-            shot.pose = types.Pose()
-            shot.pose.set_rotation_matrix(R)
-            shot.pose.translation = t
-            reconstruction.add_shot(shot)
+            reconstruction.create_shot(shot_key, camera.id, pose)
         else:
-            logger.warning('ignoring failed image {}'.format(shot_key))
+            logger.warning("ignoring failed image {}".format(shot_key))
         offset += 5
 
     # tracks
     track_lines = []
     for i in range(num_point):
-        coordinates = lines[offset].rstrip('\n').split(' ')
-        color = lines[offset + 1].rstrip('\n').split(' ')
-        point = types.Point()
-        point.id = i
-        point.coordinates = list(map(float, coordinates))
+        coordinates = lines[offset].rstrip("\n").split(" ")
+        color = lines[offset + 1].rstrip("\n").split(" ")
+        point = reconstruction.create_point(i, list(map(float, coordinates)))
         point.color = list(map(int, color))
-        reconstruction.add_point(point)
 
-        view_line = lines[offset + 2].rstrip('\n').split(' ')
+        view_line = lines[offset + 2].rstrip("\n").split(" ")
 
         num_view, view_list = int(view_line[0]), view_line[1:]
 
@@ -868,7 +914,7 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
             if shot_key in reconstruction.shots:
                 camera = reconstruction.shots[shot_key].camera
                 scale = max(camera.width, camera.height)
-                v = '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(
+                v = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
                     shot_key,
                     i,
                     view_list[4 * k + 1],
@@ -876,14 +922,14 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
                     -float(view_list[4 * k + 3]) / scale,
                     point.color[0],
                     point.color[1],
-                    point.color[2]
+                    point.color[2],
                 )
                 track_lines.append(v)
         offset += 3
 
     # save track file
     with open_wt(track_file) as fout:
-        fout.writelines('\n'.join(track_lines))
+        fout.writelines("\n".join(track_lines))
 
     # save reconstruction
     if reconstruction_file is not None:
@@ -894,6 +940,7 @@ def import_bundler(data_path, bundle_file, list_file, track_file,
 
 
 # PLY
+
 
 def ply_header(count_vertices, with_normals=False):
     if with_normals:
@@ -930,23 +977,23 @@ def ply_header(count_vertices, with_normals=False):
 
 def points_to_ply_string(vertices):
     header = ply_header(len(vertices))
-    return '\n'.join(header + vertices + [''])
+    return "\n".join(header + vertices + [""])
 
 
 def ply_to_points(filename):
     points, normals, colors = [], [], []
-    with open(filename, 'r') as fin:
+    with open(filename, "r") as fin:
         line = fin.readline()
-        while 'end_header' not in line:
+        while "end_header" not in line:
             line = fin.readline()
         line = fin.readline()
-        while line != '':
+        while line != "":
             line = fin.readline()
-            tokens = line.rstrip().split(' ')
-            if len(tokens) == 6 or len(tokens) == 7: # XYZ and RGB(A)
+            tokens = line.rstrip().split(" ")
+            if len(tokens) == 6 or len(tokens) == 7:  # XYZ and RGB(A)
                 x, y, z, r, g, b = tokens[0:6]
                 nx, ny, nz = 0, 0, 0
-            elif len(tokens) > 7:                    # XYZ + Normal + RGB
+            elif len(tokens) > 7:  # XYZ + Normal + RGB
                 x, y, z = tokens[0:3]
                 nx, ny, nz = tokens[3:6]
                 r, g, b = tokens[6:9]
@@ -966,7 +1013,8 @@ def reconstruction_to_ply(reconstruction, no_cameras=False, no_points=False):
         for point in reconstruction.points.values():
             p, c = point.coordinates, point.color
             s = "{} {} {} {} {} {}".format(
-                p[0], p[1], p[2], int(c[0]), int(c[1]), int(c[2]))
+                p[0], p[1], p[2], int(c[0]), int(c[1]), int(c[2])
+            )
             vertices.append(s)
 
     if not no_cameras:
@@ -978,6 +1026,7 @@ def reconstruction_to_ply(reconstruction, no_cameras=False, no_points=False):
                 for depth in np.linspace(0, 2, 10):
                     p = o + depth * R[axis]
                     s = "{} {} {} {} {} {}".format(
-                        p[0], p[1], p[2], int(c[0]), int(c[1]), int(c[2]))
+                        p[0], p[1], p[2], int(c[0]), int(c[1]), int(c[2])
+                    )
                     vertices.append(s)
     return points_to_ply_string(vertices)

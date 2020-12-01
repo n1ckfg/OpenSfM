@@ -1,8 +1,3 @@
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
-from __future__ import unicode_literals
-
 import numpy as np
 import string
 import random
@@ -12,7 +7,7 @@ import opensfm.reconstruction as orec
 from pprint import pprint
 from opensfm import features
 # from metrics import compute_distance
-from mytk import Listbox
+from tkinter import Listbox
 
 
 class ref:
@@ -64,7 +59,7 @@ def pix_coords(x, image):
 
 def convert_tuple_cords_to_list(matched_points):
     list_form = [[] for i in range(2)]
-    for point, observations in matched_points.items():
+    for _, observations in matched_points.items():
         list_form[0].append(observations[0])
         list_form[1].append(observations[1])
 
